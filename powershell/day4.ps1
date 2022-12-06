@@ -15,8 +15,7 @@ class RangeSet{
 		return ($this.HasInRange($other.start) -and $this.HasInRange($other.end))
 	}
 	[bool]ContainsPartially([RangeSet]$other){
-		return ($this.ContainsFully($other) -or 
-($other.GetRange().Where({$this.HasInRange([int32]$_)}).length -gt 0))
+		return ($this.ContainsFully($other) -or ($other.GetRange().Where({$this.HasInRange([int32]$_)}).length -gt 0))
 	}
 	[int32[]]GetRange(){
 		$range = @()
