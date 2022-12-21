@@ -22,35 +22,48 @@
   (column 0 :type integer))
 
 (defconstant +starting-position+ (make-grid-coordinate :row 0 :column 0))
+(defstruct knot
+  (position +starting-position+ :type grid-coordinate)
+  (knot-number 0 :type integer))
 
-(defstruct board
-    (head +starting-position+ :type grid-coordinate)
-    (tail +starting-position+ :type grid-coordinate))
+
+(defstruct board (knots))
 
 (defun create-board-sequence (board command repetition)
   "determine which action to perform and perform it REPETITION times,
    returning list of sequential positions taken on the board"
   (let ((sequence))
-  (dotimes (_ repetition)
-    (push (cond ((string= command "D") (perform-action #'move-down board))
-           ((string= command "L") (perform-action #'move-left board))
-           ((string= command "R") (perform-action #'move-right board))
-           ((string= command "U") (perform-action #'move-up board))
-           ('otherwise nil))
-        sequence)
-    (setf board (first sequence)))
-  sequence))
+    (dotimes (_ repetition)
+        (push (cond ((string= command "D") (perform-action #'move-down board))
+                    ((string= command "L") (perform-action #'move-left board))
+                    ((string= command "R") (perform-action #'move-right board))
+                    ((string= command "U") (perform-action #'move-up board)))
+            sequence)
+        (setf board (first sequence)))
+    sequence))
 
 (defun perform-action (action board)
   "move the head and move the head subsequently afterwards,
    return a new board with these positions"
-  (let* ((current-head (board-head board))
-         (current-tail (board-tail board))
-         (new-head-position (funcall action current-head))
-         (new-tail-position (if (positions-adjacent-p new-head-position current-tail)
-                                    current-tail
-                                    current-head)))
-         (make-board :head new-head-position :tail new-tail-position)))
+  (let ((new-knots)
+        (current-knots (board-knots board))) ;; for head just perform move action
+    (push (make-knot :position (funcall action (knot-position (first current-knots)))) new-knots)
+    ;; adjust the following tail dependent on preceding head or segment position
+    (do ((x 1 (1+ x))) ((>= x (length current-knots)) (make-board :knots new-knots))
+      (setf new-knots (append (copy-seq new-knots)
+                              (list (if (positions-adjacent-p (knot-position (nth x current-knots)) (knot-position (nth (- x 1) new-knots)))
+                                          (copy-knot (nth x current-knots)) ;; positions are identical, stay put
+                                        (move-closer-again (nth (1- x) new-knots) (nth x current-knots))))))))) ;; positions differ take predecessors old position
+
+
+(defun move-closer-again (head tail)
+  (let ((head-row (grid-coordinate-row (knot-position head)))
+        (head-column (grid-coordinate-column (knot-position head)))
+        (tail-row (grid-coordinate-row (knot-position tail)))
+        (tail-column (grid-coordinate-column (knot-position tail))))
+    (make-knot :knot-number (knot-knot-number tail)
+               :position (make-grid-coordinate :row (+ tail-row (signum (- head-row tail-row)))
+                                               :column (+ tail-column (signum (- head-column tail-column)))))))
 
 (defun move-up (starting-position)
   "calculates and returns the new position after moving up 1"
@@ -82,8 +95,9 @@
 
 (defun grid-coordinate= (one two)
   "predicate to determine equality between two grid-coordinate"
-  (and (= (grid-coordinate-row one) (grid-coordinate-row two))
-       (= (grid-coordinate-column one) (grid-coordinate-column two))))
+  (unless (and (null one) (null two))
+    (and (= (grid-coordinate-row one) (grid-coordinate-row two))
+       (= (grid-coordinate-column one) (grid-coordinate-column two)))))
 
 (test equality-of-grid-coordinates
   (is-true (grid-coordinate= +starting-position+ +starting-position+))
@@ -132,26 +146,56 @@
   (is-true (positions-adjacent-p (make-grid-coordinate :row 0 :column 2) (make-grid-coordinate :row 1 :column 1))))
 
 
-(defun solution-to-part-1 (contents)
+(defun count-positions-tail-visits (contents tail-number starting-board)
   "returns the number of positions our tail takes"
-    (let* ((current-board (make-board))
+    (let* ((current-board starting-board)
            (tail-positions-found)
            (boards (list current-board)))
     (dolist (line contents)
         (let* ((values (str:split " " line))
             (board-sequence (create-board-sequence current-board (first values) (parse-integer (second values)))))
+        ;;(format t "~a~%~a~%~%" line board-sequence)
         (dolist (board board-sequence)
             (unless (member board boards :test #'equal)
             (push board boards)))
         (setf current-board (first board-sequence))))
     (dolist (board boards)
-      (unless (member (board-tail board) tail-positions-found :test #'grid-coordinate=)
-        (push (board-tail board) tail-positions-found)))
+      (unless (or (null (nth tail-number (board-knots board))) (member (knot-position (nth tail-number (board-knots board))) tail-positions-found :test #'grid-coordinate=))
+        (push (knot-position (nth tail-number(board-knots board))) tail-positions-found)))
     (length tail-positions-found)))
 
 (test solution-to-part-1-verification-of-example-should-be-13
   (let ((test-contents (list "R 4" "U 4" "L 3" "D 1" "R 4" "D 1" "L 5" "R 2")))
-    (is-true (= 13 (solution1 test-contents)))))
+    (is-true (= 13 (count-positions-tail-visits test-contents 1
+                                       (make-board :knots (list (make-knot :position +starting-position+ :knot-number 0)
+                                                                (make-knot :position +starting-position+ :knot-number 1))))))))
 
+(test solution-to-part-2-verification-of-example-should-be-36
+  (let ((test-contents (list "R 5" "U 8" "L 8" "D 3" "R 17" "D 10" "L 25" "U 20")))
+    (is-true (= 36 (count-positions-tail-visits test-contents 9
+                                       (make-board :knots (list (make-knot :position +starting-position+ :knot-number 0)
+                                                                (make-knot :position +starting-position+ :knot-number 1)
+                                                                (make-knot :position +starting-position+ :knot-number 2)
+                                                                (make-knot :position +starting-position+ :knot-number 3)
+                                                                (make-knot :position +starting-position+ :knot-number 4)
+                                                                (make-knot :position +starting-position+ :knot-number 5)
+                                                                (make-knot :position +starting-position+ :knot-number 6)
+                                                                (make-knot :position +starting-position+ :knot-number 7)
+                                                                (make-knot :position +starting-position+ :knot-number 8)
+                                                                (make-knot :position +starting-position+ :knot-number 9))))))))
 
-(format t "solution to part 1: ~a~%" (solution-to-part-1 (get-contents)))
+(format t "solution to part 1: ~a~%" (count-positions-tail-visits (get-contents) 1
+                                       (make-board :knots (list (make-knot :position +starting-position+ :knot-number 0)
+                                                                (make-knot :position +starting-position+ :knot-number 1)))))
+
+(format t "solution to part 2: ~a~%" (count-positions-tail-visits (get-contents) 9
+                                       (make-board :knots (list (make-knot :position +starting-position+ :knot-number 0)
+                                                                (make-knot :position +starting-position+ :knot-number 1)
+                                                                (make-knot :position +starting-position+ :knot-number 2)
+                                                                (make-knot :position +starting-position+ :knot-number 3)
+                                                                (make-knot :position +starting-position+ :knot-number 4)
+                                                                (make-knot :position +starting-position+ :knot-number 5)
+                                                                (make-knot :position +starting-position+ :knot-number 6)
+                                                                (make-knot :position +starting-position+ :knot-number 7)
+                                                                (make-knot :position +starting-position+ :knot-number 8)
+                                                                (make-knot :position +starting-position+ :knot-number 9)))))
